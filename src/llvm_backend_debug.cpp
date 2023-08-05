@@ -329,10 +329,34 @@ gb_internal LLVMMetadataRef lb_debug_type_internal(lbModule *m, Type *type) {
 		return LLVMDIBuilderCreateTypedef(m->debug_builder, array_type, name, gb_string_length(name), nullptr, 0, nullptr, cast(u32)(8*type_align_of(type)));
 	}
 
+	case Type_Slice: {
+		LLVMMetadataRef subscripts[1] = {};
+		subscripts[0] = LLVMDIBuilderGetOrCreateSubrange(
+			m->debug_builder,
+			0ll,
+			// FIXME: this takes the count, which with slices is dynamic.
+			// There is a version of this that takes a LLVMMetadataRef as the count, but this doesn't seem to be in llvm-c.
+			// I have opened an issue on llvm: https://github.com/llvm/llvm-project/issues/64465
+			5
+		);
+
+		LLVMMetadataRef array_type = LLVMDIBuilderCreateArrayType(
+			m->debug_builder,
+			8*cast(uint64_t)type_size_of(type),
+			8*cast(unsigned)type_align_of(type),
+			lb_debug_type(m, type->Slice.elem),
+			subscripts,
+			gb_count_of(subscripts)
+		);
+
+		LLVMMetadataRef ptr_type = LLVMDIBuilderCreatePointerType(m->debug_builder, array_type, ptr_bits, ptr_bits, 0, nullptr, 0);
+
+		gbString name = type_to_string(type, temporary_allocator());
+		return LLVMDIBuilderCreateTypedef(m->debug_builder, ptr_type, name, gb_string_length(name), nullptr, 0, nullptr, cast(u32)(8*type_align_of(type)));
+	}
 
 	case Type_Struct:
 	case Type_Union:
-	case Type_Slice:
 	case Type_DynamicArray:
 	case Type_Map:
 	case Type_BitSet:
@@ -684,13 +708,7 @@ gb_internal void lb_debug_complete_types(lbModule *m) {
 			case Type_Slice:
 				element_count = 2;
 				elements = gb_alloc_array(temporary_allocator(), LLVMMetadataRef, element_count);
-				#if defined(GB_SYSTEM_WINDOWS)
-					elements[0] = lb_debug_struct_field(m, str_lit("data"), alloc_type_pointer(bt->Slice.elem), 0*int_bits);
-				#else
-					// FIX HACK TODO(bill): For some reason this causes a crash in *nix systems due to the reference counting
-					// of the debug type information
-					elements[0] = lb_debug_struct_field(m, str_lit("data"), t_rawptr, 0*int_bits);
-				#endif
+				elements[0] = lb_debug_struct_field(m, str_lit("data"), alloc_type_pointer(bt->Slice.elem), 0*int_bits);
 				elements[1] = lb_debug_struct_field(m, str_lit("len"),  t_int,                              1*int_bits);
 				break;
 			case Type_DynamicArray:
